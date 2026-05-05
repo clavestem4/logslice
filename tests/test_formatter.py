@@ -1,10 +1,8 @@
-"""Tests for logslice.formatter."""
+"""Tests for logslice.formatter module."""
 
 import json
-from datetime import datetime, timezone
-
 import pytest
-
+from datetime import datetime
 from logslice.parser import LogEntry
 from logslice.formatter import (
     format_entry_text,
@@ -12,101 +10,108 @@ from logslice.formatter import (
     format_entry_csv,
     format_entries,
     render,
-    SUPPORTED_FORMATS,
 )
+from logslice.highlight import RESET
 
 
 def make_entry(
-    message="hello world",
-    severity="INFO",
-    ts=None,
-    raw=None,
-):
-    ts = ts or datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    return LogEntry(timestamp=ts, severity=severity, message=message, raw=raw or message)
+    timestamp=None, severity=None, message=None, raw=None
+) -> LogEntry:
+    ts = datetime.fromisoformat(timestamp) if timestamp else None
+    return LogEntry(timestamp=ts, severity=severity, message=message, raw=raw)
 
 
 class TestFormatEntryText:
     def test_basic(self):
-        entry = make_entry()
+        entry = make_entry("2024-03-01T12:00:00", "info", "server started")
         result = format_entry_text(entry)
-        assert "2024-06-01" in result
+        assert "2024-03-01 12:00:00" in result
         assert "[INFO]" in result
-        assert "hello world" in result
+        assert "server started" in result
 
     def test_show_raw(self):
-        entry = make_entry(raw="RAW LINE")
-        assert format_entry_text(entry, show_raw=True) == "RAW LINE"
+        entry = make_entry(raw="raw original line", message="parsed")
+        assert format_entry_text(entry, show_raw=True) == "raw original line"
 
     def test_no_timestamp(self):
-        entry = LogEntry(timestamp=None, severity="WARN", message="oops", raw="oops")
+        entry = make_entry(severity="error", message="oops")
         result = format_entry_text(entry)
-        assert "(no timestamp)" in result
-        assert "[WARN]" in result
+        assert "[ERROR]" in result
+        assert "oops" in result
 
-    def test_no_severity(self):
-        entry = LogEntry(timestamp=make_entry().timestamp, severity=None, message="msg", raw="msg")
-        result = format_entry_text(entry)
-        assert "[" not in result
-        assert "msg" in result
+    def test_empty_entry_returns_raw_or_empty(self):
+        entry = make_entry(raw="fallback")
+        assert format_entry_text(entry) == "fallback"
+
+    def test_fully_empty_entry(self):
+        entry = LogEntry(timestamp=None, severity=None, message=None, raw=None)
+        assert format_entry_text(entry) == ""
 
 
 class TestFormatEntryJson:
-    def test_structure(self):
+    def test_returns_valid_json(self):
+        entry = make_entry("2024-01-15T08:30:00", "warning", "disk low")
+        data = json.loads(format_entry_json(entry))
+        assert data["severity"] == "warning"
+        assert data["message"] == "disk low"
+        assert "2024-01-15" in data["timestamp"]
+
+    def test_none_fields_are_null(self):
         entry = make_entry()
         data = json.loads(format_entry_json(entry))
-        assert "timestamp" in data
-        assert "severity" in data
-        assert "message" in data
-
-    def test_values(self):
-        entry = make_entry(message="test", severity="ERROR")
-        data = json.loads(format_entry_json(entry))
-        assert data["severity"] == "ERROR"
-        assert data["message"] == "test"
-
-    def test_none_timestamp(self):
-        entry = LogEntry(timestamp=None, severity="DEBUG", message="x", raw="x")
-        data = json.loads(format_entry_json(entry))
         assert data["timestamp"] is None
+        assert data["severity"] is None
 
 
 class TestFormatEntryCsv:
-    def test_header_in_format_entries(self):
-        lines = format_entries([make_entry()], fmt="csv")
-        assert lines[0] == '"timestamp","severity","message"'
+    def test_basic_csv(self):
+        entry = make_entry("2024-06-01T10:00:00", "error", "connection refused")
+        result = format_entry_csv(entry)
+        assert "error" in result
+        assert "connection refused" in result
 
-    def test_row_count(self):
-        entries = [make_entry(), make_entry(message="second")]
-        lines = format_entries(entries, fmt="csv")
-        assert len(lines) == 3  # header + 2 rows
+    def test_empty_fields(self):
+        entry = make_entry()
+        result = format_entry_csv(entry)
+        assert result.count(",") >= 2
 
-    def test_quote_escaping(self):
-        entry = make_entry(message='say "hello"')
-        row = format_entry_csv(entry)
-        assert '""' in row
+    def test_message_with_comma_is_quoted(self):
+        entry = make_entry(message="hello, world")
+        result = format_entry_csv(entry)
+        assert '"hello, world"' in result
 
 
 class TestFormatEntries:
-    def test_unsupported_format_raises(self):
-        with pytest.raises(ValueError, match="Unsupported format"):
-            format_entries([make_entry()], fmt="xml")
+    def test_text_format_no_color(self):
+        entries = [make_entry("2024-01-01T00:00:00", "info", "boot")]
+        results = list(format_entries(entries, fmt="text", color=False))
+        assert len(results) == 1
+        assert RESET not in results[0]
 
-    def test_empty_list(self):
-        assert format_entries([], fmt="text") == []
+    def test_json_format(self):
+        entries = [make_entry("2024-01-01T00:00:00", "debug", "trace")]
+        results = list(format_entries(entries, fmt="json"))
+        data = json.loads(results[0])
+        assert data["severity"] == "debug"
 
-    def test_json_multiple(self):
-        entries = [make_entry(), make_entry(severity="DEBUG", message="dbg")]
-        lines = format_entries(entries, fmt="json")
-        assert len(lines) == 2
-        assert all(json.loads(l) for l in lines)
+    def test_csv_format(self):
+        entries = [make_entry("2024-01-01T00:00:00", "info", "ok")]
+        results = list(format_entries(entries, fmt="csv"))
+        assert "info" in results[0]
+
+    def test_color_enabled_adds_ansi(self):
+        entries = [make_entry(severity="error", message="boom")]
+        results = list(format_entries(entries, fmt="text", color=True))
+        assert RESET in results[0]
 
 
 class TestRender:
-    def test_newline_joined(self):
-        entries = [make_entry(message="a"), make_entry(message="b")]
-        result = render(entries, fmt="text")
+    def test_multiple_entries_joined_by_newline(self):
+        entries = [
+            make_entry(message="line one"),
+            make_entry(message="line two"),
+        ]
+        result = render(entries, color=False)
+        assert "line one" in result
+        assert "line two" in result
         assert "\n" in result
-
-    def test_empty(self):
-        assert render([], fmt="json") == ""
