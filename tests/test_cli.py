@@ -94,3 +94,13 @@ class TestMain:
         assert rc == 0
         out = capsys.readouterr().out
         assert out == ""
+
+    def test_start_end_range_filter(self, log_file, capsys):
+        """Only entries within the given time range should appear in output."""
+        rc = main([log_file, "--start", "2024-06-01T10:04:00", "--end", "2024-06-01T10:11:00"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "heartbeat" in out
+        assert "disk full" in out
+        assert "server started" not in out
+        assert "high memory" not in out
