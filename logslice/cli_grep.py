@@ -50,7 +50,20 @@ def run_grep(
 ) -> int:
     """Execute grep filtering and write output.
 
-    Returns the number of matching entries.
+    Args:
+        entries: List of parsed log entries to search through.
+        pattern: Regular expression pattern to match against log messages.
+        ignore_case: If True, matching is case-insensitive.
+        invert: If True, return entries that do NOT match the pattern.
+        count_only: If True, only print the count of matching entries.
+        fmt: Output format; one of 'text', 'json', or 'csv'.
+        out: Output stream to write results to (defaults to sys.stdout).
+
+    Returns:
+        The number of matching entries.
+
+    Raises:
+        re.error: If the pattern is not a valid regular expression.
     """
     if out is None:
         out = sys.stdout
