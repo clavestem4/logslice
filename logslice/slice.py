@@ -28,8 +28,17 @@ def slice_file(
 
     Returns:
         List of matching LogEntry objects.
+
+    Raises:
+        FileNotFoundError: If the specified path does not exist.
+        IsADirectoryError: If the specified path is a directory.
     """
     path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Log file not found: {path}")
+    if path.is_dir():
+        raise IsADirectoryError(f"Expected a file, got a directory: {path}")
+
     with path.open(encoding=encoding, errors="replace") as fh:
         lines = fh.readlines()
 
