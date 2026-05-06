@@ -1,18 +1,19 @@
 """Command-line interface for logslice."""
+
 from __future__ import annotations
 
 import argparse
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Sequence
 
+from logslice.dedupe import deduplicate
 from logslice.formatter import render
 from logslice.slice import slice_file
-from logslice.summary import summarize
 
 
 def parse_dt(value: str) -> datetime:
-    """Parse an ISO-8601-ish datetime string from the CLI."""
+    """Parse a datetime string from the CLI (ISO-8601, with or without T)."""
     for fmt in (
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
@@ -24,7 +25,10 @@ def parse_dt(value: str) -> datetime:
             return datetime.strptime(value, fmt)
         except ValueError:
             continue
-    raise argparse.ArgumentTypeError(f"Cannot parse datetime: {value!r}")
+    raise argparse.ArgumentTypeError(
+        f"Cannot parse datetime: {value!r}. "
+        "Expected ISO-8601 format, e.g. '2024-01-15T08:30:00'."
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,24 +36,33 @@ def build_parser() -> argparse.ArgumentParser:
         prog="logslice",
         description="Extract and filter structured log entries by time range and severity.",
     )
-    p.add_argument("file", help="Path to the log file")
-    p.add_argument("--from", dest="start", type=parse_dt, metavar="DATETIME",
-                   help="Include entries at or after this timestamp")
-    p.add_argument("--to", dest="end", type=parse_dt, metavar="DATETIME",
-                   help="Include entries at or before this timestamp")
-    p.add_argument("--severity", "-s", metavar="LEVEL",
-                   help="Minimum severity level (e.g. WARNING)")
-    p.add_argument("--format", "-f", dest="fmt",
-                   choices=["text", "json", "csv"], default="text",
-                   help="Output format (default: text)")
-    p.add_argument("--summary", action="store_true",
-                   help="Print a summary instead of individual entries")
-    p.add_argument("--show-raw", action="store_true",
-                   help="Include the raw log line in text output")
+    p.add_argument("file", help="Path to the log file.")
+    p.add_argument("--start", type=parse_dt, metavar="DATETIME", help="Include entries at or after this time.")
+    p.add_argument("--end", type=parse_dt, metavar="DATETIME", help="Include entries before or at this time.")
+    p.add_argument("--level", metavar="SEVERITY", help="Minimum severity level (e.g. WARNING).")
+    p.add_argument(
+        "--format",
+        choices=("text", "json", "csv"),
+        default="text",
+        dest="fmt",
+        help="Output format (default: text).",
+    )
+    p.add_argument(
+        "--dedupe", "-D",
+        action="store_true",
+        default=False,
+        help="Remove duplicate log entries (same severity + message).",
+    )
+    p.add_argument(
+        "--keep",
+        choices=("first", "last"),
+        default="first",
+        help="Which duplicate occurrence to keep when --dedupe is active (default: first).",
+    )
     return p
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -58,22 +71,17 @@ def main(argv: Optional[list] = None) -> int:
             args.file,
             start=args.start,
             end=args.end,
-            min_severity=args.severity,
+            min_severity=args.level,
         )
-    except FileNotFoundError:
-        print(f"logslice: file not found: {args.file}", file=sys.stderr)
-        return 1
     except OSError as exc:
-        print(f"logslice: {exc}", file=sys.stderr)
+        print(f"logslice: error: {exc}", file=sys.stderr)
         return 1
 
-    if args.summary:
-        print(summarize(entries))
-        return 0
+    if args.dedupe:
+        entries = list(deduplicate(entries, keep=args.keep))
 
-    output = render(entries, fmt=args.fmt, show_raw=args.show_raw)
-    if output:
-        print(output)
+    output = render(entries, fmt=args.fmt)
+    print(output, end="" if output.endswith("\n") else "\n")
     return 0
 
 
