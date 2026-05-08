@@ -41,6 +41,9 @@ def deduplicate(
     if keep not in ("first", "last"):
         raise ValueError(f"keep must be 'first' or 'last', got {keep!r}")
 
+    if max_seen is not None and max_seen < 1:
+        raise ValueError(f"max_seen must be a positive integer, got {max_seen!r}")
+
     seen: dict[str, LogEntry] = {}
 
     for entry in entries:
