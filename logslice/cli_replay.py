@@ -52,7 +52,24 @@ def run_replay(args: argparse.Namespace, out=sys.stdout) -> int:
 
     Returns:
         Total number of log entries emitted.
+
+    Raises:
+        SystemExit: If *args.speed* or *args.max_delay* contain invalid values.
     """
+    if args.speed <= 0:
+        print(
+            f"error: --speed must be a positive number, got {args.speed}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if args.max_delay < 0:
+        print(
+            f"error: --max-delay must be non-negative, got {args.max_delay}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     entries = slice_file(
         args.file,
         min_severity=args.severity,
